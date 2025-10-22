@@ -1,3 +1,4 @@
+
 #include <Wire.h>
 #include "Adafruit_TCS34725.h"
 
@@ -18,7 +19,7 @@ Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS3472
 #define W_LED_ON 20
 #define IR_LED_ON 21
 
-#define threshold 3120  // Ngưỡng phân biệt line
+#define threshold 3890  // Ngưỡng phân biệt line
 
 // Hệ số PID
 float Kp = 120.0;
@@ -32,9 +33,6 @@ float thoigianre = 175;
 
 // Tốc độ cơ bản động cơ
 int baseSpeed = 255;
-
-// Tốc độ tối thiểu để cả 2 bánh luôn quay khi vào cua
-int minSpeed = 50; // Điều chỉnh từ 60-120 tùy robot của bạn
 
 void setup()
 {
@@ -69,16 +67,6 @@ void setup()
 
   stop();
   delay(1000);
-  
-  // ===== KHỞI ĐỘNG MỀM - Tăng tốc từ từ để tránh sụt áp =====
-  for(int speed = 0; speed <= minSpeed; speed += 10) {
-    analogWrite(PWM_PIN_L_A, speed);
-    analogWrite(PWM_PIN_L_B, 0);
-    analogWrite(PWM_PIN_R_A, speed);
-    analogWrite(PWM_PIN_R_B, 0);
-    delay(30);
-  }
-  // ===== HẾT PHẦN KHỞI ĐỘNG MỀM =====
 }
 
 void loop()
@@ -124,6 +112,7 @@ void loop()
   // Tính error theo trọng số vị trí cảm biến
   float error = (s1 * -3 + s2 * -1 + s3 * 1 + s4 * 3) / (float)sum;
 
+  // --- PHẦN THÊM VÀO ---
   // Tính tích phân (Integral) bằng cách cộng dồn sai số
   integral += error;
   
@@ -131,21 +120,24 @@ void loop()
   if (abs(error) < 0.5) { // Nếu sai số rất nhỏ (robot gần như đi thẳng)
     integral = 0;
   }
+  // Hoặc bạn có thể giới hạn giá trị của integral
+  // integral = constrain(integral, -300, 300); // Ví dụ giới hạn integral trong khoảng -300 đến 300
 
   // Tính đạo hàm (derivative)
   float derivative = error - last_error;
   last_error = error;
 
-  // Tính hiệu chỉnh theo PID
+  // Tính hiệu chỉnh theo PID (thay vì PD)
   float correction = Kp * error + Ki * integral + Kd * derivative;
+  // --- KẾT THÚC PHẦN THÊM VÀO ---
 
   // Tính tốc độ động cơ trái và phải
   int leftSpeed = baseSpeed - correction;
   int rightSpeed = baseSpeed + correction;
 
-  // Giới hạn tốc độ trong khoảng minSpeed-255 để cả 2 bánh luôn quay
-  leftSpeed = constrain(leftSpeed, minSpeed, 255);
-  rightSpeed = constrain(rightSpeed, minSpeed, 255);
+  // Giới hạn tốc độ trong khoảng 0-255
+  leftSpeed = constrain(leftSpeed, 0, 255);
+  rightSpeed = constrain(rightSpeed, 0, 255);
 
   // Điều khiển động cơ tiến
   analogWrite(PWM_PIN_L_A, leftSpeed);
@@ -177,24 +169,32 @@ void stop()
 void re_phai()
 {
   // --- Hành động 1: Đi thẳng qua ngã tư (đã điều chỉnh) ---
+  // GIẢM thời gian delay, thậm chí có thể bỏ nếu robot của bạn rẽ tốt hơn khi không có nó.
+  // Bắt đầu bằng cách giảm tốc độ và thời gian.
   analogWrite(PWM_PIN_L_A, 80); 
   analogWrite(PWM_PIN_L_B, 0);
   analogWrite(PWM_PIN_R_A, 80);
   analogWrite(PWM_PIN_R_B, 0);
-  delay(10);
+  delay(10); // Giảm từ 100ms xuống 50ms, bạn có thể thử với 20ms hoặc 0ms.
 
   // --- Hành động 2: Xoay phải tại chỗ (đã điều chỉnh) ---
-  int turnSpeed = 180; 
+  // QUAN TRỌNG: GIẢM TỐC ĐỘ để tránh sụt áp và trượt bánh.
+  // Tốc độ 180-200 thường là đủ mạnh để xoay mà không gây sụt áp.
+  int turnSpeed = 150; 
   analogWrite(PWM_PIN_L_A, turnSpeed);
   analogWrite(PWM_PIN_L_B, 0);
   analogWrite(PWM_PIN_R_A, 0);
   analogWrite(PWM_PIN_R_B, turnSpeed);
   
+  // Bạn có thể cần điều chỉnh lại thời gian delay này cho phù hợp với tốc độ xoay mới
+  // để robot xoay được đúng góc 90 độ.
   delay(thoigianre); 
 
   // --- Hành động 3: Dò lại vạch sau khi xoay ---
+  // Phần này giữ nguyên, nhưng có thể thêm một điều kiện an toàn để thoát vòng lặp
+  // nếu không tìm thấy line sau một thời gian nhất định.
   unsigned long startTime = millis();
-  while(millis() - startTime < 1000)
+  while(millis() - startTime < 1000) // Thêm giới hạn thời gian 1 giây để tránh bị kẹt
   {
     int s2_check = (analogRead(SENSOR_2_PIN) <= threshold) ? 1 : 0;
     int s3_check = (analogRead(SENSOR_3_PIN) <= threshold) ? 1 : 0;
